@@ -7,12 +7,16 @@
 # in the FTDI examples folder.
 # You can make it by typing a cli command, "make".
 #
+# You need to memo the file paths for usbserial.ko 
+# and ftdi_sio.ko, by a CLI command, "modinfo".
+#
 # You need not to find a ftdi device path, 
 # because of automatic the device.
 #
 # You may execute it by typing a cli command, 
-# "start_write.sh < (program binary file)".
+# "start_write.sh (program binary file)".
 #
 # You need to recover usbserial.ko and ftdi_sio.ko 
-# by an insmod command after the above operations.
+# by an CLI command, "insmod", after the above operations.
+# 
 #
