@@ -1,5 +1,5 @@
-// TEST PROGRAM (REV02) FOR PROGRAMING KURUMI
-// MADE BY HIROFUMI INOMATA, 26TH, JAN. 2013 (C)
+// TEST PROGRAM (REV02m) FOR PROGRAMING KURUMI
+// MADE BY HIROFUMI INOMATA, 26TH, JAN. 2016 (C)
 // AND PRESENTED WITH BSD LICENSE,
 // WITH TESTING ONLY ONE CASE
 //
@@ -10,8 +10,16 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
-#include <sys/ioctl_compat.h>
+//#include <sys/ioctl_compat.h>
 #include <termios.h>
+
+#include "../ftd2xx.h"
+
+int ftdi_open( const char *, int );
+ssize_t ftdi_write( int , const void *, size_t );
+ssize_t ftdi_read( int , void *, size_t );
+
+FT_HANDLE ftHandle = NULL;
 
 unsigned char buf[ 256*1024 ]; // 256KB
 unsigned long bufLen;
@@ -44,6 +52,8 @@ int main( int argc, char **argv )
 	struct termios termios;
 	unsigned int stat_org, stat_cur;
 	int cLen;
+	FT_STATUS ftStatus;
+	DWORD len_rx, len_tx, event;
 
 	if ( argc < 2 ) {
 		fprintf( stderr, "less arg (%d)\n", argc );
@@ -57,48 +67,65 @@ int main( int argc, char **argv )
 	fprintf( stderr, "Program Size = %08ld Byte\n", bufLen );
 
 	// open com port
-	pathCom = open ( argv[1], O_RDWR | O_NONBLOCK |  O_NOCTTY );
+	pathCom = ftdi_open ( argv[1], O_RDWR | O_NONBLOCK |  O_NOCTTY );
 	if (pathCom == -1) {
 		fprintf( stderr, "ERROR(%d): can't open com port\n", __LINE__ );
 	}
 
-	tcgetattr( pathCom, &termios );
-	cfsetspeed( &termios, B115200 );
-	termios.c_cflag &= (~CSIZE);
-	termios.c_cflag |= (CS8);
-	termios.c_cflag |= (CSTOPB);
-	termios.c_cflag &= (~PARENB);
-	termios.c_iflag |= IGNPAR;
-	tcsetattr( pathCom, TCSANOW, &termios );
-	
-	ret = ioctl( pathCom, TIOCMGET, &stat_org );
+printf( "GO 1\n" );
+	// tcgetattr( pathCom, &termios );
+	// cfsetspeed( &termios, B115200 );
+	// termios.c_cflag &= (~CSIZE);
+	// termios.c_cflag |= (CS8);
+	// termios.c_cflag |= (CSTOPB);
+	// termios.c_cflag &= (~PARENB);
+	// termios.c_iflag |= IGNPAR;
+	// tcsetattr( pathCom, TCSANOW, &termios );
+	{
+		ftStatus = FT_SetBaudRate( ftHandle, 115200 );
+		ftStatus = FT_SetDataCharacteristics(ftHandle, 
+		     FT_BITS_8,
+		     FT_STOP_BITS_2,
+		     // FT_STOP_BITS_1,
+		     FT_PARITY_NONE);
+		ftStatus = FT_SetFlowControl( ftHandle, FT_FLOW_NONE, 
+			0x11, 0x13 );
+	}
 
-	stat_cur = stat_org | TIOCM_DTR;
-	ret = ioctl( pathCom, TIOCMSET, &stat_cur );	// set DTR
+	ftStatus = FT_SetDtr( ftHandle );	// Set DTR
 
-	ret = ioctl( pathCom, TIOCSBRK, NULL );	// start break
+	ftStatus = FT_SetBreakOn( ftHandle );	// start break
 
-	tcflush( pathCom, TCIOFLUSH );	// flush i/0 buffer
+	// tcflush( pathCom, TCIOFLUSH );	// flush i/0 buffer
+	ftStatus = FT_Purge( ftHandle, FT_PURGE_TX | FT_PURGE_RX );
 
-	stat_cur = stat_org & (~TIOCM_DTR);
-	ret = ioctl( pathCom, TIOCMSET, &stat_cur );	// clear DTR
+	// stat_cur = stat_org & (~TIOCM_DTR);
 
-	usleep( 730 );
+	ftStatus = FT_ClrDtr( ftHandle );	// Clear DTR
 
-	ret = ioctl( pathCom, TIOCCBRK, NULL ); // finsh break
-	tcflush( pathCom, TCIOFLUSH );	// flush i/o buffer
+	// usleep( 730 );
+	usleep( 1000 );
 
-	usleep( 20 );
+	ftStatus = FT_SetBreakOff( ftHandle ); // finish break
+
+	// tcflush( pathCom, TCIOFLUSH );	// flush i/o buffer
+	ftStatus = FT_Purge( ftHandle, FT_PURGE_TX | FT_PURGE_RX );
+
+	//usleep( 20 );
+	usleep( 50 );
+
 
 	cLen = 0;
 	cmd[cLen++] = 0x00;	// 2-wire
-	ret = write( pathCom, cmd, cLen );
+	ret = ftdi_write( pathCom, cmd, cLen );
 	if ( ret < cLen ) {
-		fprintf( stderr, "ERROR(%d): can't write 2-wire comand!\n", __LINE__ );
+		fprintf( stderr, "ERROR(%d): can't write 2-wire comand!\n", 
+			__LINE__ );
 		exit(-1);
 	}
 
-	usleep( 65 );
+	//usleep( 65 );
+	usleep( 100 );
 
 	// set bps
 	cLen = 0;
@@ -110,29 +137,37 @@ int main( int argc, char **argv )
 	cmd[cLen++] = 0x00;
 	cmd[cLen++] = 0x03;
 	setChksum( cmd );
-	ret = write ( pathCom , cmd, cLen );
+	ret = ftdi_write ( pathCom , cmd, cLen );
 	if ( ret < cLen ) {
-		fprintf( stderr, "ERROR(%d): can't write bps setup comand!\n", __LINE__ );
+		fprintf( stderr, "ERROR(%d): can't write bps setup comand!\n", 
+			__LINE__ );
 		exit(-1);
 	}
 
 	for (;;) {
-		ret = read ( pathCom, res, 1 );
-		if ( ret <= 0) continue;
+		ret = ftdi_read ( pathCom, res, 1 );
+		if ( ret <= 0) {
+			printf( "wate for ...\n" );
+			continue;
+		}
 		if ( res[0] == 0x03 ) break;
 		fprintf( stderr, "%02x:", res[0] );
 	}
 	fprintf( stderr, "%02x:", res[0] );
 	for (;;) {
-		ret = read ( pathCom, res, 1 );
-		if ( ret <= 0) continue;
+		ret = ftdi_read ( pathCom, res, 1 );
+		if ( ret <= 0) {
+			printf( "wate for ...\n" );
+			continue;
+		}
 		if ( res[0] == 0x03 ) break;
 		fprintf( stderr, "%02x:", res[0] );
 	}
 	fprintf( stderr, "%02x:", res[0] );
 	fprintf( stderr, "\n\n" );
 
-	tcflush( pathCom, TCIOFLUSH );	// flush i/0 buffer
+	// tcflush( pathCom, TCIOFLUSH );	// flush i/0 buffer
+	ftStatus = FT_Purge( ftHandle, FT_PURGE_TX | FT_PURGE_RX );
 
 	for (i=0;i<256;i++ ) {
 		long adr = i * 1024;
@@ -147,18 +182,23 @@ int main( int argc, char **argv )
 		cmd[cLen++] = 0x00; // SUM
 		cmd[cLen++] = 0x03; // TEX
 		setChksum( cmd );
-		ret = write ( pathCom , cmd, cLen );
+		ret = ftdi_write ( pathCom , cmd, cLen );
 		if ( ret < cLen ) {
-			fprintf( stderr, "ERROR(%d): can't write Block Erase Command!\n", 
-				__LINE__ );
+			fprintf( stderr, 
+			"ERROR(%d): can't write Block Erase Command!\n", 
+			__LINE__ );
 			exit(-1);
 		} else {
-			fprintf( stderr, "Addr: %ld, write Block Erase command\n", adr );
+			fprintf( stderr, 
+			"Addr: %ld, write Block Erase command\n", adr );
 		}
 
 		for (;;) {
-			ret = read ( pathCom, res, 1 );
-			if ( ret <= 0) continue;
+			ret = ftdi_read ( pathCom, res, 1 );
+			if ( ret <= 0) {
+				printf( "wate for ...\n" );
+				continue;
+			}
 			if ( res[0] == 0x03 ) break;
 			fprintf( stderr, "%02x:", res[0] );
 		}
@@ -183,24 +223,28 @@ int main( int argc, char **argv )
 	cmd[cLen++] = 0x03; // ETX
 	setChksum( cmd );
 	fprintf( stderr, "HML = %02x%02x%02x\n", cmd[8],cmd[7],cmd[6] );
-	ret = write ( pathCom , cmd, cLen );
+	ret = ftdi_write ( pathCom , cmd, cLen );
 	if ( ret < cLen ) {
-		fprintf( stderr, "ERROR(%d): can't write Programming Command\n", 
-			__LINE__ );
+		fprintf( stderr, 
+		"ERROR(%d): can't write Programming Command\n", 
+		__LINE__ );
 		exit(-1);
 	} else {
 		fprintf( stderr, "write programming command\n" );
 	}
 
 	for (;;) {
-		ret = read ( pathCom, res, 1 );
-		if ( ret <= 0) continue;
+		ret = ftdi_read ( pathCom, res, 1 );
+		if ( ret <= 0) {
+			printf( "wate for ...\n" );
+			continue;
+		}
 		if ( res[0] == 0x03 ) break;
 		fprintf( stderr, "%02x:", res[0] );
 	}
 	fprintf( stderr, "%02x:", res[0] );
 
-	tcflush( pathCom, TCIOFLUSH );	// flush i/0 buffer
+	ftStatus = FT_Purge( ftHandle, FT_PURGE_TX | FT_PURGE_RX ); // flush
 	fprintf( stderr, "\n\n" );
 
 	// send data
@@ -215,7 +259,7 @@ int main( int argc, char **argv )
 		dat[1] = 0;
 
 		len = 256;
-		fprintf( stderr, "Addr:%d, Size:%d goes\n", i, dat[1] );
+		// fprintf( stderr, "Addr:%d, Size:%d goes\n", i, dat[1] );
 		// fprintf( stderr, "%d - %d\n", i, dat[1] );
 
 		for (j=0; j<len; j++ ) {
@@ -229,16 +273,30 @@ int main( int argc, char **argv )
 			dat[3+len] = 0x17;	// not end
 			fprintf( stderr, " cnt<- " );
 		}
-		ret = write ( pathCom , dat, (4+len) );
+		ret = ftdi_write ( pathCom , dat, (4+len) );
 		if (ret < (4+len) ) {
-			fprintf( stderr, "ERROR(%d): can't write data!\n", __LINE__ );
+			fprintf( stderr, "ERROR(%d): can't write data!\n", 
+			__LINE__ );
 		} else {
 			fprintf( stderr, "Done data write (ret=%d)\n", ret );
 		}
 
 		for (;;) {
-			ret = read ( pathCom, res, 1 );
-			if ( ret <= 0) continue;
+			ftStatus = FT_GetStatus( ftHandle, &len_rx, 
+				&len_tx, &event );
+			if ( ftStatus != FT_OK ) {
+				printf( "FT_GetStatus erroe\n" );
+			}
+			if ( len_rx > 0 ) break;
+			// printf( "ev = %d\n", event );
+		}
+
+		for (;;) {
+			ret = ftdi_read ( pathCom, res, 1 );
+			if ( ret <= 0) {
+				printf( "wate for ...\n" );
+				continue;
+			}
 			if ( res[0] == 0x03 ) break;
 			fprintf( stderr, "%02x:", res[0] );
 		}
@@ -247,22 +305,83 @@ int main( int argc, char **argv )
 	}
 
 	for (;;) {
-		ret = read ( pathCom, res, 1 );
-		if ( ret <= 0) continue;
+		ret = ftdi_read ( pathCom, res, 1 );
+		if ( ret <= 0) {
+			printf( "wate for ...\n" );
+			continue;
+		}
 		if ( res[0] == 0x03 ) break;
 		fprintf( stderr, "%02x:", res[0] );
 	}
 	fprintf( stderr, "%02x:", res[0] );
 	fprintf( stderr, "\n\n" );
 
-	stat_cur = stat_org | TIOCM_DTR;
-	ret = ioctl( pathCom, TIOCMSET, &stat_cur );	// set DTR
+	ftStatus = FT_SetDtr( ftHandle );	// set DTR
 	
 	usleep(1000);
 
-	stat_cur &= (~TIOCM_DTR);
-	ret = ioctl( pathCom, TIOCMSET, &stat_cur );	// set DTR
+	ftStatus = FT_ClrDtr( ftHandle );	// clear DTR
 
-	close( pathCom );
+	ftStatus =  FT_Close( ftHandle );
+}
+
+
+int ftdi_open( const char *path, int option ) {
+	FT_STATUS ftStatus;
+	int iNumDevs = 0;
+	char *pcBufLD[2];
+	char cBufLD[64];
+	pcBufLD[0] = cBufLD;
+	pcBufLD[1] = NULL;
+
+	ftStatus = FT_ListDevices( pcBufLD, &iNumDevs, 
+		FT_LIST_ALL | FT_OPEN_BY_SERIAL_NUMBER );
+        if(ftStatus != FT_OK) {
+                printf( "Error: FT_ListDevices(%d)\n", (int)ftStatus );
+                return -1;
+        }
+	printf( "iNumDevs= %d\n", iNumDevs );
+	printf( "cBufLD = %s\n", cBufLD );
+	if( (ftStatus = FT_OpenEx( cBufLD, 
+		FT_OPEN_BY_SERIAL_NUMBER, &ftHandle)) != FT_OK ) {
+		/*
+			This can fail if the ftdi_sio driver is loaded
+			use lsmod to check this and rmmod ftdi_sio to remove
+			also rmmod usbserial
+		*/
+		printf("Error FT_OpenEx(%d), device %d\n", (int)ftStatus, 0 );
+		printf("Use lsmod to check if ftdi_sio (and usbserial) "
+			"are present.\n");
+		printf("If so, unload them using rmmod, as they conflict "
+			"with ftd2xx.\n");
+		return -1;
+	}
+	return 0;
+}
+
+ssize_t ftdi_write( int fd, const void *buf, size_t len ) {
+	FT_STATUS ftStatus;
+	DWORD dwBytesWritten;
+	dwBytesWritten = 0;
+
+	ftStatus = FT_Write( ftHandle, buf, len, &dwBytesWritten );
+	if ( ftStatus != FT_OK ) {
+		printf( "write error\n" );
+	}
+
+	return dwBytesWritten;
+}
+
+ssize_t ftdi_read( int fd, void *buf, size_t len ) {
+	FT_STATUS ftStatus;
+	DWORD dwBytesRead;
+	dwBytesRead = 0;
+
+	ftStatus = FT_Read( ftHandle, buf, len, &dwBytesRead );
+	if ( ftStatus != FT_OK ) {
+		printf( "read error\n" );
+	}
+
+	return dwBytesRead;
 }
 

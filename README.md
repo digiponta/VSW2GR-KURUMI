@@ -3,13 +3,15 @@
 # the source codes offered with BSD license
 # made by H. Inomata, (C)2016
 #
+# You need to put the folder of this source codes 
+# in the FTDI examples folder.
 # You can make it by typing a cli command, "make".
 #
-# You can find a ftdi device path by typing a cli 
-# command, "ls /dev/cu.u*".
+# You need not to find a ftdi device path, 
+# because of automatic the device.
 #
 # You may execute it by typing a cli command, 
-# "vsw2gr-kurumi (the ftdi device path) < (program binary file)".
+# "start_write.sh < (program binary file)".
 #
 
 
