@@ -13,5 +13,6 @@
 # You may execute it by typing a cli command, 
 # "start_write.sh < (program binary file)".
 #
-
-
+# You need to recover usbserial.ko and ftdi_sio.ko 
+# by an insmod command after the above operations.
+#
